@@ -21,7 +21,6 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.geode.cache.DataPolicy;
 import org.apache.geode.cache.DiskStore;
-import org.apache.geode.cache.RegionExistsException;
 import org.apache.geode.cache.Scope;
 import org.apache.geode.cache.execute.Function;
 import org.apache.geode.cache.execute.FunctionContext;
@@ -34,12 +33,12 @@ import org.apache.geode.management.internal.security.ResourcePermissions;
 import org.apache.geode.security.ResourcePermission;
 
 /**
- * Function used to set up the sequence generator tool.
+ * Function used to set up the distributed sequence tool.
  */
-public class SetUpFunction implements Function<DataPolicy> {
-  public static final String FUNCTION_ID = "SetUpFunction";
-  public static final String SEQUENCES_REGION_ID = "Sequences";
-  public static final String SEQUENCES_DISK_STORE_ID = "Sequences_DiskStore";
+class SetUpFunction implements Function<DataPolicy> {
+  static final String FUNCTION_ID = "DSequenceSetUp";
+  static final String DISTRIBUTED_SEQUENCES_REGION_ID = "DSequences";
+  static final String DISTRIBUTED_SEQUENCES_DISK_STORE_ID = "DSequences_DiskStore";
   private static final ReentrantLock reentrantLock = new ReentrantLock();
 
   @Override
@@ -81,10 +80,10 @@ public class SetUpFunction implements Function<DataPolicy> {
    * @return The {@link DiskStore} to be used by the sequences region.
    */
   DiskStore getOrCreateDiskStore(InternalCache internalCache) {
-    DiskStore diskStore = internalCache.findDiskStore(SEQUENCES_DISK_STORE_ID);
+    DiskStore diskStore = internalCache.findDiskStore(DISTRIBUTED_SEQUENCES_DISK_STORE_ID);
 
     if (diskStore == null) {
-      diskStore = internalCache.createDiskStoreFactory().create(SEQUENCES_DISK_STORE_ID);
+      diskStore = internalCache.createDiskStoreFactory().create(DISTRIBUTED_SEQUENCES_DISK_STORE_ID);
     }
 
     return diskStore;
@@ -98,24 +97,25 @@ public class SetUpFunction implements Function<DataPolicy> {
    * @param dataPolicy The data policy for the region holding the sequences.
    */
   void createRegion(InternalCache internalCache, String diskStoreName, DataPolicy dataPolicy) {
-    // Set Up Region Attributes
-    RegionAttributesCreation regionAttributesCreation = new RegionAttributesCreation();
-    regionAttributesCreation.setDataPolicy(dataPolicy);
-    regionAttributesCreation.setKeyConstraint(String.class);
-    regionAttributesCreation.setValueConstraint(Long.class);
-    regionAttributesCreation.setDiskSynchronous(true);
-    regionAttributesCreation.setDiskStoreName(diskStoreName);
-    regionAttributesCreation.setScope(Scope.DISTRIBUTED_ACK);
-    InternalRegionArguments internalRegionArguments = new InternalRegionArguments().setInternalRegion(true);
+    // Check again while holding the lock.
+    if (internalCache.getRegion(DISTRIBUTED_SEQUENCES_REGION_ID) == null) {
+      // Set Up Region Attributes
+      RegionAttributesCreation regionAttributesCreation = new RegionAttributesCreation();
+      regionAttributesCreation.setDataPolicy(dataPolicy);
+      regionAttributesCreation.setKeyConstraint(String.class);
+      regionAttributesCreation.setValueConstraint(Long.class);
+      regionAttributesCreation.setDiskSynchronous(true);
+      regionAttributesCreation.setDiskStoreName(diskStoreName);
+      regionAttributesCreation.setScope(Scope.DISTRIBUTED_ACK);
+      InternalRegionArguments internalRegionArguments = new InternalRegionArguments().setInternalRegion(true);
 
-    try {
-      // InternalCacheForClientAccess to allow creating an internal region from client side.
-      InternalCacheForClientAccess cacheForClientAccess = internalCache.getCacheForProcessingClientRequests();
-      cacheForClientAccess.createInternalRegion(SEQUENCES_REGION_ID, regionAttributesCreation, internalRegionArguments);
-    } catch (IOException | ClassNotFoundException exception) {
-      throw new FunctionException("Internal error while creating the region", exception);
-    } catch (RegionExistsException ignore) {
-      // Ignore, another client might have won the race and created the region already.
+      try {
+        // InternalCacheForClientAccess to allow creating an internal region from client side.
+        InternalCacheForClientAccess cacheForClientAccess = internalCache.getCacheForProcessingClientRequests();
+        cacheForClientAccess.createInternalRegion(DISTRIBUTED_SEQUENCES_REGION_ID, regionAttributesCreation, internalRegionArguments);
+      } catch (IOException | ClassNotFoundException exception) {
+        throw new FunctionException("Internal error while creating the region", exception);
+      }
     }
   }
 
@@ -125,9 +125,9 @@ public class SetUpFunction implements Function<DataPolicy> {
       throw new FunctionException("The function needs an instance of InternalCache to execute some non-public methods.");
     }
 
-    // Create region if not already created.\
+    // Create region if not already created.
     InternalCache internalCache = (InternalCache) context.getCache();
-    if (internalCache.getRegion(SEQUENCES_REGION_ID) == null) {
+    if (internalCache.getRegion(DISTRIBUTED_SEQUENCES_REGION_ID) == null) {
       // Hold the lock to avoid multiple threads creating the region and/or diskStore at the same time.
       reentrantLock.lock();
 

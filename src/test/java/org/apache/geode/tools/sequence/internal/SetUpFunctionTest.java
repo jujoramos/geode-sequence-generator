@@ -15,7 +15,6 @@
 package org.apache.geode.tools.sequence.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
@@ -39,7 +38,6 @@ import org.apache.geode.cache.DataPolicy;
 import org.apache.geode.cache.DiskStore;
 import org.apache.geode.cache.DiskStoreFactory;
 import org.apache.geode.cache.Region;
-import org.apache.geode.cache.RegionExistsException;
 import org.apache.geode.cache.Scope;
 import org.apache.geode.cache.execute.FunctionContext;
 import org.apache.geode.cache.execute.FunctionException;
@@ -106,16 +104,6 @@ public class SetUpFunctionTest {
   }
 
   @Test
-  @Parameters(method = "dataPolicies")
-  public void executeShouldIgnoreRegionExistsException(DataPolicy dataPolicy) throws IOException, ClassNotFoundException {
-    when(functionContext.getArguments()).thenReturn(dataPolicy);
-    when(internalCache.findDiskStore(any())).thenReturn(mock(DiskStore.class));
-
-    doThrow(new RegionExistsException(mock(Region.class))).when(internalCacheForClientAccess).createInternalRegion(any(), any(), any());
-    assertThatCode(() -> setUpFunction.execute(functionContext)).doesNotThrowAnyException();
-  }
-
-  @Test
   public void executeShouldNotReCreateDiskStore() throws IOException, ClassNotFoundException {
     when(internalCache.getRegion(any())).thenReturn(null);
     when(functionContext.getArguments()).thenReturn(mock(DataPolicy.class));
@@ -143,16 +131,16 @@ public class SetUpFunctionTest {
     ArgumentCaptor<InternalRegionArguments> internalArgumentsCaptor = ArgumentCaptor.forClass(InternalRegionArguments.class);
     ArgumentCaptor<RegionAttributesCreation> regionAttributesCaptor = ArgumentCaptor.forClass(RegionAttributesCreation.class);
     DiskStore mockDiskStore = mock(DiskStore.class);
-    when(mockDiskStore.getName()).thenReturn(SetUpFunction.SEQUENCES_DISK_STORE_ID);
-    when(diskStoreFactory.create(SetUpFunction.SEQUENCES_DISK_STORE_ID)).thenReturn(mockDiskStore);
+    when(mockDiskStore.getName()).thenReturn(SetUpFunction.DISTRIBUTED_SEQUENCES_DISK_STORE_ID);
+    when(diskStoreFactory.create(SetUpFunction.DISTRIBUTED_SEQUENCES_DISK_STORE_ID)).thenReturn(mockDiskStore);
     when(functionContext.getArguments()).thenReturn(dataPolicy);
 
     setUpFunction.execute(functionContext);
-    verify(diskStoreFactory).create(SetUpFunction.SEQUENCES_DISK_STORE_ID);
+    verify(diskStoreFactory).create(SetUpFunction.DISTRIBUTED_SEQUENCES_DISK_STORE_ID);
     verify(internalCacheForClientAccess).createInternalRegion(regionNameCaptor.capture(), regionAttributesCaptor.capture(), internalArgumentsCaptor.capture());
 
     // Assert arguments used to create the region.
-    assertThat(regionNameCaptor.getValue()).isEqualTo(SetUpFunction.SEQUENCES_REGION_ID);
+    assertThat(regionNameCaptor.getValue()).isEqualTo(SetUpFunction.DISTRIBUTED_SEQUENCES_REGION_ID);
     InternalRegionArguments internalRegionArguments = internalArgumentsCaptor.getValue();
     assertThat(internalRegionArguments.isInternalRegion()).isTrue();
     RegionAttributesCreation regionAttributes = regionAttributesCaptor.getValue();
@@ -160,6 +148,6 @@ public class SetUpFunctionTest {
     assertThat(regionAttributes.getKeyConstraint()).isEqualTo(String.class);
     assertThat(regionAttributes.getValueConstraint()).isEqualTo(Long.class);
     assertThat(regionAttributes.getScope()).isEqualTo(Scope.DISTRIBUTED_ACK);
-    assertThat(regionAttributes.getDiskStoreName()).isEqualTo(SetUpFunction.SEQUENCES_DISK_STORE_ID);
+    assertThat(regionAttributes.getDiskStoreName()).isEqualTo(SetUpFunction.DISTRIBUTED_SEQUENCES_DISK_STORE_ID);
   }
 }

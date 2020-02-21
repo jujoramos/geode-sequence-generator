@@ -42,30 +42,30 @@ import org.apache.geode.cache.execute.ResultSender;
 import org.apache.geode.distributed.DistributedLockService;
 
 @RunWith(JUnitParamsRunner.class)
-public class SequenceFunctionTest {
-  private SequenceFunction sequenceFunction;
+public class NextBatchFunctionTest {
   private ResultSender<Object> resultSender;
-  private FunctionContext<SequenceArgs> functionContext;
+  private NextBatchFunction nextBatchFunction;
+  private FunctionContext<NextBatchFunction.Args> functionContext;
 
   @Before
   @SuppressWarnings("unchecked")
   public void setUp() {
     resultSender = mock(ResultSender.class);
-    sequenceFunction = spy(SequenceFunction.class);
     functionContext = mock(RegionFunctionContext.class);
+    nextBatchFunction = spy(NextBatchFunction.class);
   }
 
   private DistributedLockService mockDistributedLockService(boolean returnValue) {
     DistributedLockService mockDistributedLockService = mock(DistributedLockService.class);
     when(mockDistributedLockService.lock(anyString(),anyLong(), anyLong())).thenReturn(returnValue);
-    doReturn(mockDistributedLockService).when(sequenceFunction).getDistributedLockService(any(), any());
+    doReturn(mockDistributedLockService).when(nextBatchFunction).getDistributedLockService(any(), any());
 
     return mockDistributedLockService;
   }
 
   private void mockRegionFunctionContext(String sequenceId, Integer batchSize, Region<Object, Object> region) {
     when(functionContext.getResultSender()).thenReturn(resultSender);
-    when(functionContext.getArguments()).thenReturn(new SequenceArgs(sequenceId, batchSize));
+    when(functionContext.getArguments()).thenReturn(new NextBatchFunction.Args(sequenceId, batchSize));
     RegionFunctionContext regionFunctionContext = (RegionFunctionContext) functionContext;
     when(regionFunctionContext.getDataSet()).thenReturn(region);
   }
@@ -73,10 +73,10 @@ public class SequenceFunctionTest {
   @Test
   public void executeShouldThrowExceptionWhenContextIsNotInstanceOfRegionFunctionContext() {
     @SuppressWarnings("unchecked")
-    FunctionContext<SequenceArgs> mockContext = mock(FunctionContext.class);
-    when(mockContext.getArguments()).thenReturn(new SequenceArgs("", 0));
+    FunctionContext<NextBatchFunction.Args> mockContext = mock(FunctionContext.class);
+    when(mockContext.getArguments()).thenReturn(new NextBatchFunction.Args("", 0));
 
-    assertThatThrownBy(() -> sequenceFunction.execute(mockContext))
+    assertThatThrownBy(() -> nextBatchFunction.execute(mockContext))
         .isInstanceOf(FunctionException.class)
         .hasMessage("This is a data aware function, and has to be called using FunctionService.onRegion.");
   }
@@ -86,7 +86,7 @@ public class SequenceFunctionTest {
     mockDistributedLockService(false);
     mockRegionFunctionContext("sequenceId", 10, null);
 
-    assertThatThrownBy(() -> sequenceFunction.execute(functionContext))
+    assertThatThrownBy(() -> nextBatchFunction.execute(functionContext))
         .isInstanceOf(FunctionException.class)
         .hasMessage("Could no acquire Distributed Lock for sequence sequenceId.");
   }
@@ -105,7 +105,7 @@ public class SequenceFunctionTest {
     mockRegionFunctionContext(seqId, batchSize, region);
     DistributedLockService distributedLockService = mockDistributedLockService(true);
 
-    sequenceFunction.execute(functionContext);
+    nextBatchFunction.execute(functionContext);
     verify(distributedLockService).unlock(seqId);
     verify(resultSender).lastResult(expectedValues);
     verify(region).put(seqId, lastSequence +  batchSize);

@@ -14,10 +14,8 @@
  */
 package org.apache.geode.tools.sequence.internal;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.List;
 
 import org.apache.geode.cache.Cache;
 import org.apache.geode.cache.Declarable;
@@ -31,13 +29,10 @@ import org.apache.geode.management.internal.security.ResourcePermissions;
 import org.apache.geode.security.ResourcePermission;
 
 /**
- * Function used to get the next batch of unique sequence ids.
- * The actual internal region hosting the sequences is created by {@link SetUpFunction}.
+ * Function used to get the current value for an existing sequence.
  */
-public class SequenceFunction implements Function<SequenceArgs>, Declarable {
-  public final static String FUNCTION_ID = "SequenceFunction";
-  private final static  Object LOCK_SYNC = new Object();
-  private final static String DISTRIBUTED_LOCK_SERVICE_PREFIX = "_sequenceLockService";
+class GetFunction extends AbstractFunction implements Function<String>, Declarable {
+  final static String FUNCTION_ID = "DSequenceGet";
 
   @Override
   public String getId() {
@@ -69,42 +64,17 @@ public class SequenceFunction implements Function<SequenceArgs>, Declarable {
     return getRequiredPermissions(regionName);
   }
 
-  /**
-   * Obtains (or creates) the {@link DistributedLockService} associated to the sequences.
-   *
-   * @param cache Geode cache to use when obtaining or crating the {@link DistributedLockService}.
-   * @param sequenceId Name of the sequence to use for building the {@link DistributedLockService}.
-   * @return the {@link DistributedLockService} to use generating sequences.
-   */
-  DistributedLockService getDistributedLockService(Cache cache, String sequenceId) {
-    DistributedLockService distributedLockService;
-    String lockServiceName = sequenceId + DISTRIBUTED_LOCK_SERVICE_PREFIX;
-    distributedLockService = DistributedLockService.getServiceNamed(lockServiceName);
-
-    if (distributedLockService == null) {
-      synchronized (LOCK_SYNC) {
-        distributedLockService = DistributedLockService.getServiceNamed(lockServiceName);
-        if (distributedLockService == null) {
-            distributedLockService = DistributedLockService.create(lockServiceName, cache.getDistributedSystem());
-        }
-      }
-    }
-
-    return distributedLockService;
-  }
-
   @Override
-  public void execute(FunctionContext<SequenceArgs> functionContext) {
+  public void execute(FunctionContext<String> functionContext) {
     Cache cache = functionContext.getCache();
-    String sequenceId = functionContext.getArguments().getId();
-    Integer batchSize = functionContext.getArguments().getBatchSize();
+    String sequenceId = functionContext.getArguments();
 
     // Should never happen as users must not invoke this function directly
     if (!(functionContext instanceof RegionFunctionContext)) {
       throw new FunctionException("This is a data aware function, and has to be called using FunctionService.onRegion.");
     }
 
-    List<Long> sequences = new ArrayList<>(batchSize);
+    long lastSequence;
     RegionFunctionContext regionFunctionContext = (RegionFunctionContext) functionContext;
     DistributedLockService distributedLockService = getDistributedLockService(cache, sequenceId);
     boolean locked = distributedLockService.lock(sequenceId, -1, -1);
@@ -113,9 +83,7 @@ public class SequenceFunction implements Function<SequenceArgs>, Declarable {
     if (locked) {
       try {
         Region<String, Long> sequenceRegion = regionFunctionContext.getDataSet();
-        long lastSequence = sequenceRegion.getOrDefault(sequenceId, 0L);
-        for (int i = 0; i < batchSize; i++) sequences.add(lastSequence++);
-        sequenceRegion.put(sequenceId, lastSequence);
+        lastSequence = sequenceRegion.getOrDefault(sequenceId, 0L);
       } finally {
         // Release the lock no matter what.
         distributedLockService.unlock(sequenceId);
@@ -124,6 +92,6 @@ public class SequenceFunction implements Function<SequenceArgs>, Declarable {
       throw new FunctionException(String.format("Could no acquire Distributed Lock for sequence %s.", sequenceId));
     }
 
-    functionContext.getResultSender().lastResult(sequences);
+    functionContext.getResultSender().lastResult(lastSequence);
   }
 }

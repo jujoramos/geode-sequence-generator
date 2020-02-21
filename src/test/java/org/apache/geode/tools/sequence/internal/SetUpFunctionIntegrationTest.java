@@ -20,6 +20,15 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.IntStream;
 
 import junitparams.JUnitParamsRunner;
@@ -75,12 +84,12 @@ public class SetUpFunctionIntegrationTest {
         .execute(setUpFunction);
 
     // Assert Disk Store
-    DiskStore diskStore = serverStarterRule.getCache().findDiskStore(SetUpFunction.SEQUENCES_DISK_STORE_ID);
+    DiskStore diskStore = serverStarterRule.getCache().findDiskStore(SetUpFunction.DISTRIBUTED_SEQUENCES_DISK_STORE_ID);
     assertThat(diskStore).isNotNull();
-    assertThat(diskStore.getName()).isEqualTo(SetUpFunction.SEQUENCES_DISK_STORE_ID);
+    assertThat(diskStore.getName()).isEqualTo(SetUpFunction.DISTRIBUTED_SEQUENCES_DISK_STORE_ID);
 
     // Assert Region Attributes
-    Region<?, ?> sequencesRegion = serverStarterRule.getCache().getRegion(SetUpFunction.SEQUENCES_REGION_ID);
+    Region<?, ?> sequencesRegion = serverStarterRule.getCache().getRegion(SetUpFunction.DISTRIBUTED_SEQUENCES_REGION_ID);
     assertThat(sequencesRegion).isNotNull();
     RegionAttributes<?, ?> regionAttributes = sequencesRegion.getAttributes();
     assertThat(regionAttributes.getDataPolicy()).isEqualTo(dataPolicy);
@@ -88,7 +97,7 @@ public class SetUpFunctionIntegrationTest {
     assertThat(regionAttributes.getValueConstraint()).isEqualTo(Long.class);
     assertThat(regionAttributes.getScope()).isEqualTo(Scope.DISTRIBUTED_ACK);
     assertThat(regionAttributes.isDiskSynchronous()).isTrue();
-    assertThat(regionAttributes.getDiskStoreName()).isEqualTo(SetUpFunction.SEQUENCES_DISK_STORE_ID);
+    assertThat(regionAttributes.getDiskStoreName()).isEqualTo(SetUpFunction.DISTRIBUTED_SEQUENCES_DISK_STORE_ID);
   }
 
   @Test
@@ -100,13 +109,40 @@ public class SetUpFunctionIntegrationTest {
         .setArguments(dataPolicy)
         .execute(setUpFunction);
 
-    assertThat(serverStarterRule.getCache().getRegion(SetUpFunction.SEQUENCES_REGION_ID)).isNotNull();
-    assertThat(serverStarterRule.getCache().findDiskStore(SetUpFunction.SEQUENCES_DISK_STORE_ID)).isNotNull();
+    assertThat(serverStarterRule.getCache().getRegion(SetUpFunction.DISTRIBUTED_SEQUENCES_REGION_ID)).isNotNull();
+    assertThat(serverStarterRule.getCache().findDiskStore(SetUpFunction.DISTRIBUTED_SEQUENCES_DISK_STORE_ID)).isNotNull();
 
     // Execute the function again, it shouldn't re-create already created stuff.
     IntStream.range(0, 10).forEach(i -> FunctionService.onMember(serverStarterRule.getCache().getMyId()).setArguments(dataPolicy).execute(setUpFunction));
 
     verify(setUpFunction, times(1)).getOrCreateDiskStore(any());
     verify(setUpFunction, times(1)).createRegion(any(), any(), any());
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  @Parameters(method = "dataPolicies")
+  public void onlyOneThreadCanCreateRegionAndDiskStore(DataPolicy dataPolicy) throws InterruptedException, ExecutionException {
+    int threads = 100;
+    CyclicBarrier cyclicBarrier = new CyclicBarrier(threads);
+    List<Callable<Void>> initializers = new ArrayList<>();
+    ExecutorService executorService = Executors.newFixedThreadPool(threads);
+
+    // Launch threads to execute the function concurrently on the server
+    IntStream.range(0, threads).forEach(value -> initializers.add(() -> {
+      cyclicBarrier.await();
+
+      FunctionService
+          .onMember(serverStarterRule.getCache().getMyId())
+          .setArguments(dataPolicy)
+          .execute(new SetUpFunction());
+
+      return null;
+    }));
+
+    Collection<Future<Void>> futures = executorService.invokeAll(initializers);
+    for (Future<Void> future : futures) {
+      future.get();
+    }
   }
 }

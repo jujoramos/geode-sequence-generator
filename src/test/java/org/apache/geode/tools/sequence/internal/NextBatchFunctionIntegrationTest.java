@@ -20,7 +20,15 @@ import static org.mockito.Mockito.spy;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 
 import junitparams.JUnitParamsRunner;
@@ -41,10 +49,10 @@ import org.apache.geode.test.assertj.LogFileAssert;
 import org.apache.geode.test.junit.rules.ServerStarterRule;
 
 @RunWith(JUnitParamsRunner.class)
-public class SequenceFunctionIntegrationTest {
+public class NextBatchFunctionIntegrationTest {
   private static final String SEQUENCE_ID = "mySequence";
   private File logFile;
-  private SequenceFunction sequenceFunction;
+  private NextBatchFunction nextBatchFunction;
   private Region<String, Long> sequencesRegion;
 
   @Rule
@@ -58,7 +66,7 @@ public class SequenceFunctionIntegrationTest {
 
   @Before
   public void setUp() throws IOException {
-    sequenceFunction = spy(SequenceFunction.class);
+    nextBatchFunction = spy(NextBatchFunction.class);
     logFile = temporaryFolder.newFile(testName.getMethodName());
     serverStarterRule.withProperty("log-file", logFile.getAbsolutePath()).startServer();
   }
@@ -76,7 +84,7 @@ public class SequenceFunctionIntegrationTest {
         .<String, Long>createRegionFactory(regionShortcut)
         .create(regionName);
     sequencesRegion.put(SEQUENCE_ID, lastSequence);
-    FunctionService.registerFunction(sequenceFunction);;
+    FunctionService.registerFunction(nextBatchFunction);
   }
 
   @Test
@@ -88,8 +96,8 @@ public class SequenceFunctionIntegrationTest {
 
     FunctionService
         .onMember(serverStarterRule.getCache().getMyId())
-        .setArguments(new SequenceArgs("", 1))
-        .execute(sequenceFunction);
+        .setArguments(new NextBatchFunction.Args("", 1))
+        .execute(nextBatchFunction);
 
     LogFileAssert.assertThat(logFile).contains("org.apache.geode.cache.execute.FunctionException: This is a data aware function, and has to be called using FunctionService.onRegion.");
   }
@@ -99,14 +107,14 @@ public class SequenceFunctionIntegrationTest {
   @SuppressWarnings("unchecked")
   @Parameters(method = "getRegionTypes")
   public void executeShouldReturnExpectedValues(RegionShortcut regionShortcut) {
-    int batchSize = 200;
-    long lastSequence = 100L;
+    int batchSize = 1;
+    long lastSequence = 0L;
     parametrizedSetUp(lastSequence, testName.getMethodName(), regionShortcut);
 
     ResultCollector<List<Long>, List<List<Long>>> collector = FunctionService
         .onRegion(sequencesRegion)
-        .setArguments(new SequenceArgs(SEQUENCE_ID, batchSize))
-        .execute(sequenceFunction);
+        .setArguments(new NextBatchFunction.Args(SEQUENCE_ID, batchSize))
+        .execute(nextBatchFunction);
 
     List<Long> expectedValues = new ArrayList<>();
     LongStream.iterate(lastSequence, val -> val + 1).limit(batchSize).forEach(expectedValues::add);
@@ -116,5 +124,49 @@ public class SequenceFunctionIntegrationTest {
     assertThat(sequences.size()).isEqualTo(1);
     assertThat(sequences.get(0)).isNotNull();
     assertThat(sequences.get(0)).isEqualTo(expectedValues);
+  }
+
+  @Test
+  @TestCaseName("{method}_{0}")
+  @SuppressWarnings("unchecked")
+  @Parameters(method = "getRegionTypes")
+  public void executeShouldReturnExpectedValuesWhenExecutedConcurrently(RegionShortcut regionShortcut) throws InterruptedException, ExecutionException {
+    int threads = 50;
+    int batchSize = 200;
+    long lastSequence = 0L;
+    CyclicBarrier cyclicBarrier = new CyclicBarrier(threads);
+    List<Callable<List<Long>>> retrievers = new ArrayList<>();
+    ExecutorService executorService = Executors.newFixedThreadPool(threads);
+    parametrizedSetUp(lastSequence, testName.getMethodName(), regionShortcut);
+
+    // Launch threads to execute the function concurrently on the server
+    IntStream.range(0, threads).forEach(value -> retrievers.add(() -> {
+      cyclicBarrier.await();
+
+      ResultCollector<List<Long>, List<List<Long>>> collector = FunctionService
+          .onRegion(sequencesRegion)
+          .setArguments(new NextBatchFunction.Args(SEQUENCE_ID, batchSize))
+          .execute(new NextBatchFunction());
+
+      List<List<Long>> sequences = collector.getResult();
+      assertThat(sequences).isNotNull();
+      assertThat(sequences.size()).isEqualTo(1);
+      assertThat(sequences.get(0)).isNotNull();
+      assertThat(sequences.get(0).size()).isEqualTo(batchSize);
+
+      return sequences.get(0);
+    }));
+
+    // Aggregate and and assert results
+    List<Long> actualResults = new ArrayList<>();
+    List<Long> expectedResults = new ArrayList<>();
+    LongStream.iterate(lastSequence, val -> val + 1).limit(threads * batchSize).forEach(expectedResults::add);
+    Collection<Future<List<Long>>> futures = executorService.invokeAll(retrievers);
+    for (Future<List<Long>> future : futures) {
+      actualResults.addAll(future.get());
+    }
+
+    assertThat(actualResults.containsAll(expectedResults)).isTrue();
+    assertThat(expectedResults.containsAll(actualResults)).isTrue();
   }
 }
