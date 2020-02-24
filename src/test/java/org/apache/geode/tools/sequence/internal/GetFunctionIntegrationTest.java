@@ -37,7 +37,6 @@ import org.apache.geode.cache.execute.FunctionService;
 import org.apache.geode.cache.execute.ResultCollector;
 import org.apache.geode.test.assertj.LogFileAssert;
 import org.apache.geode.test.junit.rules.ServerStarterRule;
-import org.apache.geode.tools.sequence.internal.GetFunction;
 
 @RunWith(JUnitParamsRunner.class)
 public class GetFunctionIntegrationTest {

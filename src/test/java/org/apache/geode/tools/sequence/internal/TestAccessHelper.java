@@ -2,6 +2,7 @@ package org.apache.geode.tools.sequence.internal;
 
 import static org.apache.geode.tools.sequence.internal.SetUpFunction.DISTRIBUTED_SEQUENCES_DISK_STORE_ID;
 import static org.apache.geode.tools.sequence.internal.SetUpFunction.DISTRIBUTED_SEQUENCES_REGION_ID;
+import static org.apache.geode.tools.sequence.internal.SetUpFunction.FUNCTION_ID;
 
 import org.apache.geode.cache.execute.FunctionService;
 import org.apache.geode.test.dunit.rules.MemberVM;
@@ -22,6 +23,10 @@ public class TestAccessHelper {
       FunctionService.registerFunction(new NextBatchFunction());
       FunctionService.registerFunction(new SetUpFunction());
     }, members);
+  }
+
+  public static String getSetUpFunctionId() {
+    return FUNCTION_ID;
   }
 
   public static String getDistributedSequencesRegionId() {

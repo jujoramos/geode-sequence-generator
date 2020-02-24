@@ -36,7 +36,6 @@ import org.apache.geode.cache.execute.FunctionException;
 import org.apache.geode.cache.execute.RegionFunctionContext;
 import org.apache.geode.cache.execute.ResultSender;
 import org.apache.geode.distributed.DistributedLockService;
-import org.apache.geode.tools.sequence.internal.GetFunction;
 
 @RunWith(JUnitParamsRunner.class)
 public class GetFunctionTest {

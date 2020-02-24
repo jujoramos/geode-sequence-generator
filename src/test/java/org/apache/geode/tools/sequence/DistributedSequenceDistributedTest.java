@@ -17,6 +17,7 @@ package org.apache.geode.tools.sequence;
 import static org.apache.geode.test.awaitility.GeodeAwaitility.await;
 import static org.apache.geode.tools.sequence.internal.TestAccessHelper.getDistributedSequencesRegionDiskStoreId;
 import static org.apache.geode.tools.sequence.internal.TestAccessHelper.getDistributedSequencesRegionId;
+import static org.apache.geode.tools.sequence.internal.TestAccessHelper.getSetUpFunctionId;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.Serializable;
@@ -49,6 +50,8 @@ import org.apache.geode.cache.client.ClientCache;
 import org.apache.geode.cache.client.PoolFactory;
 import org.apache.geode.cache.client.PoolManager;
 import org.apache.geode.internal.cache.InternalCache;
+import org.apache.geode.internal.cache.execute.metrics.FunctionStats;
+import org.apache.geode.internal.cache.execute.metrics.FunctionStatsManager;
 import org.apache.geode.test.dunit.AsyncInvocation;
 import org.apache.geode.test.dunit.rules.ClientVM;
 import org.apache.geode.test.dunit.rules.ClusterStartupRule;
@@ -84,12 +87,20 @@ public class DistributedSequenceDistributedTest implements Serializable {
     return expectedValues;
   }
 
-  private void launchClientInitializerThreads(int threadsPerClientVm, String sequenceId, RegionType regionType) throws InterruptedException, ExecutionException {
+  private void initializeClients(RegionType regionType) {
+    MemberVM.invokeInEveryMember(() -> {
+      ClientCache clientCache = ClusterStartupRule.getClientCache();
+      assertThat(clientCache).isNotNull();
+      DistributedSequenceFactory.initialize(clientCache, regionType);
+    }, client1, client2);
+  }
+
+  private void launchClientInitializerThreads(int threadsPerClientVm, RegionType regionType) throws InterruptedException, ExecutionException {
     ClientCache clientCache = ClusterStartupRule.getClientCache();
     assertThat(clientCache).isNotNull();
     List<Callable<Object>> invokers = new ArrayList<>(threadsPerClientVm);
     ExecutorService executorService = Executors.newFixedThreadPool(threadsPerClientVm);
-    IntStream.range(0, threadsPerClientVm).forEach(value -> invokers.add(Executors.callable(new InitializeRunnable(sequenceId, regionType, clientCache))));
+    IntStream.range(0, threadsPerClientVm).forEach(value -> invokers.add(Executors.callable(new InitializeRunnable(regionType, clientCache))));
 
     List<Future<Object>> initializers = executorService.invokeAll(invokers);
     for (Future<Object> initializer : initializers) {
@@ -97,12 +108,12 @@ public class DistributedSequenceDistributedTest implements Serializable {
     }
   }
 
-  private List<Long> launchNextBatchThreads(int threadsPerClientVm, String sequenceId, RegionType regionType, int batchSize) throws InterruptedException, ExecutionException {
+  private List<Long> launchNextBatchThreads(int threadsPerClientVm, String sequenceId, int batchSize) throws InterruptedException, ExecutionException {
     ClientCache clientCache = ClusterStartupRule.getClientCache();
     assertThat(clientCache).isNotNull();
     List<Callable<List<Long>>> invokers = new ArrayList<>(threadsPerClientVm);
     ExecutorService executorService = Executors.newFixedThreadPool(threadsPerClientVm);
-    IntStream.range(0, threadsPerClientVm).forEach(value -> invokers.add(new NextBatchCallable(batchSize, DistributedSequenceFactory.getSequence(sequenceId, regionType, clientCache))));
+    IntStream.range(0, threadsPerClientVm).forEach(value -> invokers.add(new NextBatchCallable(batchSize, DistributedSequenceFactory.getSequence(sequenceId))));
 
     List<Long> aggregateResults = new ArrayList<>();
     List<Future<List<Long>>> retrievers = executorService.invokeAll(invokers);
@@ -113,12 +124,12 @@ public class DistributedSequenceDistributedTest implements Serializable {
     return aggregateResults;
   }
 
-  private List<Long> launchIncrementAndGetThreads(int threadsPerClientVm, String sequenceId, RegionType regionType) throws InterruptedException, ExecutionException {
+  private List<Long> launchIncrementAndGetThreads(int threadsPerClientVm, String sequenceId) throws InterruptedException, ExecutionException {
     ClientCache clientCache = ClusterStartupRule.getClientCache();
     assertThat(clientCache).isNotNull();
     List<Callable<Long>> invokers = new ArrayList<>(threadsPerClientVm);
     ExecutorService executorService = Executors.newFixedThreadPool(threadsPerClientVm);
-    IntStream.range(0, threadsPerClientVm).forEach(value -> invokers.add(new IncrementAndGetCallable(DistributedSequenceFactory.getSequence(sequenceId, regionType, clientCache))));
+    IntStream.range(0, threadsPerClientVm).forEach(value -> invokers.add(new IncrementAndGetCallable(DistributedSequenceFactory.getSequence(sequenceId))));
 
     List<Long> aggregateResults = new ArrayList<>();
     List<Future<Long>> retrievers = executorService.invokeAll(invokers);
@@ -137,7 +148,7 @@ public class DistributedSequenceDistributedTest implements Serializable {
     client1.invoke(() -> {
       PoolFactory poolFactory = PoolManager.createFactory();
       poolFactory.addServer("localhost", server1.getPort()).create("TestPool");
-      DistributedSequenceFactory.getSequence("mySequence", regionType, "TestPool", ClusterStartupRule.getClientCache());
+      DistributedSequenceFactory.initialize(ClusterStartupRule.getClientCache(), regionType, "TestPool");
 
       assertThat(ClusterStartupRule.getClientCache().getRegion(getDistributedSequencesRegionId())).isNotNull();
     });
@@ -178,7 +189,7 @@ public class DistributedSequenceDistributedTest implements Serializable {
     client1.invoke(() -> {
       ClientCache clientCache = ClusterStartupRule.getClientCache();
       assertThat(clientCache).isNotNull();
-      DistributedSequenceFactory.getSequence("mySequence", regionType, clientCache);
+      DistributedSequenceFactory.initialize(clientCache, regionType);
       assertThat(clientCache.getRegion(getDistributedSequencesRegionId())).isNotNull();
     });
 
@@ -204,16 +215,11 @@ public class DistributedSequenceDistributedTest implements Serializable {
   }
 
   @Test
-  @Parameters({
-      "REPLICATE, mySequence, mySequence",
-      "REPLICATE, seqClient1, seqClient2",
-      "PARTITION, mySequence, mySequence",
-      "PARTITION, seqClient1, seqClient2",
-  })
-  @TestCaseName("[{index}] {method}(RegionType:{0},SequenceClient1:{1},SequenceClient2:{2})")
-  public void initializeCanBeInvokedConcurrentlyByMultipleClients(RegionType regionType, String sequenceIdClient1, String sequenceIdClient2) throws ExecutionException, InterruptedException {
-    AsyncInvocation<?> asyncInvocationClient1 = client1.invokeAsync(() -> launchClientInitializerThreads(30, sequenceIdClient1, regionType));
-    AsyncInvocation<?> asyncInvocationClient2 = client2.invokeAsync(() -> launchClientInitializerThreads(40, sequenceIdClient2, regionType));
+  @Parameters({"REPLICATE", "PARTITION"})
+  @TestCaseName("[{index}] {method}(RegionType:{0})")
+  public void initializeCanBeInvokedConcurrentlyByMultipleClients(RegionType regionType) throws ExecutionException, InterruptedException {
+    AsyncInvocation<?> asyncInvocationClient1 = client1.invokeAsync(() -> launchClientInitializerThreads(30, regionType));
+    AsyncInvocation<?> asyncInvocationClient2 = client2.invokeAsync(() -> launchClientInitializerThreads(40, regionType));
 
     asyncInvocationClient1.await();
     asyncInvocationClient2.await();
@@ -225,7 +231,7 @@ public class DistributedSequenceDistributedTest implements Serializable {
       assertThat(clientCache.getRegion(getDistributedSequencesRegionId())).isNotNull();
     }, client1, client2);
 
-    // Region and disk store should be created in all members.
+    // Region and disk store should be created in all members
     MemberVM.invokeInEveryMember(() -> {
       InternalCache internalCache = ClusterStartupRule.getCache();
       assertThat(internalCache).isNotNull();
@@ -244,33 +250,41 @@ public class DistributedSequenceDistributedTest implements Serializable {
       assertThat(regionAttributes.isDiskSynchronous()).isTrue();
       assertThat(regionAttributes.getDiskStoreName()).isEqualTo(getDistributedSequencesRegionDiskStoreId());
     }, server1, server2);
+
+    // SetUpFunction invoked only once per member.
+    MemberVM.invokeInEveryMember(() -> {
+      InternalCache internalCache = ClusterStartupRule.getCache();
+      assertThat(internalCache).isNotNull();
+      FunctionStats functionStats = FunctionStatsManager.getFunctionStats(getSetUpFunctionId());
+      assertThat(functionStats.getFunctionExecutionCalls()).isEqualTo(2);
+    }, server1, server2);
   }
 
   @Test
   @Parameters({"REPLICATE", "PARTITION"})
   @TestCaseName("[{index}] {method}(RegionType:{0})")
   public void getShouldReturnRequestedValue(RegionType regionType) {
+    initializeClients(regionType);
     String sequenceId = "mySequence";
-    MemberVM.invokeInEveryMember(() -> {
-      ClientCache clientCache = ClusterStartupRule.getClientCache();
-      assertThat(clientCache).isNotNull();
-      DistributedSequenceFactory.getSequence(sequenceId, regionType, clientCache);
-    }, client1, client2);
 
     // First invocation, should create the sequence and retrieve the requested value
     client1.invoke(() -> {
-      ClientCache clientCache = ClusterStartupRule.getClientCache();
-      DistributedSequence
-          distributedSequence = DistributedSequenceFactory.getSequence(sequenceId, regionType, clientCache);
-
+      DistributedSequence distributedSequence = DistributedSequenceFactory.getSequence(sequenceId);
       assertThat(distributedSequence.get()).isEqualTo(0L);
+    });
+
+    // Manually modify the sequence (clients must not do this).
+    server1.invoke(() -> {
+      InternalCache internalCache = ClusterStartupRule.getCache();
+      assertThat(internalCache).isNotNull();
+      Region<String, Long> sequencesRegion = internalCache.getRegion(getDistributedSequencesRegionId());
+      sequencesRegion.put(sequenceId, 10L);
     });
 
     // Invoke from other client, should use the existing sequence and retrieve the requested value
     client2.invoke(() -> {
-      ClientCache clientCache = ClusterStartupRule.getClientCache();
-      DistributedSequence distributedSequence = DistributedSequenceFactory.getSequence(sequenceId, regionType, clientCache);
-      assertThat(distributedSequence.get()).isEqualTo(0L);
+      DistributedSequence distributedSequence = DistributedSequenceFactory.getSequence(sequenceId);
+      assertThat(distributedSequence.get()).isEqualTo(10L);
     });
   }
 
@@ -278,25 +292,18 @@ public class DistributedSequenceDistributedTest implements Serializable {
   @Parameters({"REPLICATE", "PARTITION"})
   @TestCaseName("[{index}] {method}(RegionType:{0})")
   public void nextBatchShouldReturnRequestedValues(RegionType regionType) {
+    initializeClients(regionType);
     String sequenceId = "mySequence";
-    MemberVM.invokeInEveryMember(() -> {
-      ClientCache clientCache = ClusterStartupRule.getClientCache();
-      assertThat(clientCache).isNotNull();
-      DistributedSequenceFactory.getSequence(sequenceId, regionType, clientCache);
-    }, client1, client2);
 
     // First invocation, should create the sequence and retrieve the requested batchSize
     client1.invoke(() -> {
-      ClientCache clientCache = ClusterStartupRule.getClientCache();
-      DistributedSequence distributedSequence = DistributedSequenceFactory.getSequence(sequenceId, regionType, clientCache);
-
+      DistributedSequence distributedSequence = DistributedSequenceFactory.getSequence(sequenceId);
       assertThat(distributedSequence.nextBatch(10)).isEqualTo(buildExpectedResult(0L, 10));
     });
 
     // Invoke from other client, should use the existing sequence and retrieve the requested batchSize
     client2.invoke(() -> {
-      ClientCache clientCache = ClusterStartupRule.getClientCache();
-      DistributedSequence distributedSequence = DistributedSequenceFactory.getSequence(sequenceId, regionType, clientCache);
+      DistributedSequence distributedSequence = DistributedSequenceFactory.getSequence(sequenceId);
       assertThat(distributedSequence.nextBatch(100)).isEqualTo(buildExpectedResult(10L, 100));
     });
   }
@@ -310,8 +317,9 @@ public class DistributedSequenceDistributedTest implements Serializable {
   })
   @TestCaseName("[{index}] {method}(RegionType:{0},SequenceClient1:{1},SequenceClient2:{2})")
   public void nextBatchCanBeInvokedByMultipleClientsConcurrentlyAndReturnRequestedValues(RegionType regionType, String sequenceClient1, String sequenceClient2) throws ExecutionException, InterruptedException {
-    AsyncInvocation<List<Long>> asyncInvocationClient1 = client1.invokeAsync(() -> launchNextBatchThreads(30, sequenceClient1, regionType, 50));
-    AsyncInvocation<List<Long>> asyncInvocationClient2 = client2.invokeAsync(() -> launchNextBatchThreads(40, sequenceClient2, regionType, 100));
+    initializeClients(regionType);
+    AsyncInvocation<List<Long>> asyncInvocationClient1 = client1.invokeAsync(() -> launchNextBatchThreads(30, sequenceClient1, 50));
+    AsyncInvocation<List<Long>> asyncInvocationClient2 = client2.invokeAsync(() -> launchNextBatchThreads(40, sequenceClient2, 100));
 
     asyncInvocationClient1.await();
     asyncInvocationClient2.await();
@@ -339,12 +347,8 @@ public class DistributedSequenceDistributedTest implements Serializable {
   @Parameters({"REPLICATE", "PARTITION"})
   @TestCaseName("[{index}] {method}(RegionType:{0})")
   public void incrementAndGetShouldReturnRequestedValue(RegionType regionType) {
+    initializeClients(regionType);
     String sequenceId = "mySequence";
-    MemberVM.invokeInEveryMember(() -> {
-      ClientCache clientCache = ClusterStartupRule.getClientCache();
-      assertThat(clientCache).isNotNull();
-      DistributedSequenceFactory.getSequence(sequenceId, regionType, clientCache);
-    }, client1, client2);
 
     // Invoke the incrementAndGet some times randomly from the clients.
     Random random = new Random();
@@ -352,8 +356,7 @@ public class DistributedSequenceDistributedTest implements Serializable {
     LongStream.range(0, 50).forEach(value -> {
       ClientVM clientVM = clientVMS.get(random.nextInt(2));
       clientVM.invoke(() -> {
-        ClientCache clientCache = ClusterStartupRule.getClientCache();
-        DistributedSequence distributedSequence = DistributedSequenceFactory.getSequence(sequenceId, regionType, clientCache);
+        DistributedSequence distributedSequence = DistributedSequenceFactory.getSequence(sequenceId);
         assertThat(distributedSequence.incrementAndGet()).isEqualTo(value);
       });
     });
@@ -368,8 +371,9 @@ public class DistributedSequenceDistributedTest implements Serializable {
   })
   @TestCaseName("[{index}] {method}(RegionType:{0},SequenceClient1:{1},SequenceClient2:{2})")
   public void incrementAndGetCanBeInvokedByMultipleClientsConcurrentlyAndReturnRequestedValues(RegionType regionType, String sequenceClient1, String sequenceClient2) throws ExecutionException, InterruptedException {
-    AsyncInvocation<List<Long>> asyncInvocationClient1 = client1.invokeAsync(() -> launchIncrementAndGetThreads(30, sequenceClient1, regionType));
-    AsyncInvocation<List<Long>> asyncInvocationClient2 = client2.invokeAsync(() -> launchIncrementAndGetThreads(40, sequenceClient2, regionType));
+    initializeClients(regionType);
+    AsyncInvocation<List<Long>> asyncInvocationClient1 = client1.invokeAsync(() -> launchIncrementAndGetThreads(30, sequenceClient1));
+    AsyncInvocation<List<Long>> asyncInvocationClient2 = client2.invokeAsync(() -> launchIncrementAndGetThreads(40, sequenceClient2));
 
     asyncInvocationClient1.await();
     asyncInvocationClient2.await();
@@ -394,19 +398,17 @@ public class DistributedSequenceDistributedTest implements Serializable {
   }
 
   private static class InitializeRunnable implements Runnable {
-    private final String sequenceId;
     private final RegionType regionType;
     private final ClientCache clientCache;
 
-    public InitializeRunnable(String sequenceId, RegionType regionType, ClientCache clientCache) {
-      this.sequenceId = sequenceId;
+    public InitializeRunnable(RegionType regionType, ClientCache clientCache) {
       this.regionType = regionType;
       this.clientCache = clientCache;
     }
 
     @Override
     public void run() {
-      DistributedSequenceFactory.getSequence(sequenceId, regionType, clientCache);
+      DistributedSequenceFactory.initialize(clientCache, regionType);
     }
   }
 
