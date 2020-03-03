@@ -50,6 +50,13 @@ $ ./gradlew build
 
 ## <a name="usage"></a>Usage
 
+### Server Side
+
+Build the tool and deploy it to a running [Apache Geode](http://geode.apache.org/) cluster using the
+[gfsh deploy](https://geode.apache.org/docs/guide/111/tools_modules/gfsh/command-pages/deploy.html) command.
+
+### Client Application
+
 Initialize the `geode-sequence-generator` by invoking the `DistributedSequenceFactory.initialize()` 
 method. By default the tool will use a `PARTITION_PERSISTENT` region to store and compute the sequences, 
 but you can further customize the region type and which specific servers will act as the sequence service
