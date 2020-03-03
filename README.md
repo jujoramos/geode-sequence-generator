@@ -5,8 +5,8 @@
 2. [Building From Source](#building)
 3. [Usage](#usage)
 
-** This project used as the starting point the tool [`geode-single-32bit-sequence`](geode-single-32bit-sequence),
-developed by Charlie Black some years ago. ***
+_This project used as the starting point the tool [`geode-single-32bit-sequence`](geode-single-32bit-sequence),
+developed by Charlie Black some years ago._
 
 ## <a name="overview"></a>Overview
 
