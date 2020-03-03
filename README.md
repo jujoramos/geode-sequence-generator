@@ -1,6 +1,6 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0) 
 
-# GEODE Sequence Generator
+# Geode Sequence Generator
 1. [Overview](#overview)
 2. [Building From Source](#building)
 3. [Usage](#usage)
@@ -50,7 +50,7 @@ $ ./gradlew build
 
 ## <a name="usage"></a>Usage
 
-### Server Side
+### Deploy
 
 Build the tool and deploy it to a running [Apache Geode](http://geode.apache.org/) cluster using the
 [gfsh deploy](https://geode.apache.org/docs/guide/111/tools_modules/gfsh/command-pages/deploy.html) command.
