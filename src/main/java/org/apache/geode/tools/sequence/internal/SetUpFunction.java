@@ -35,7 +35,8 @@ import org.apache.geode.security.ResourcePermission;
 /**
  * Function used to set up the distributed sequence tool.
  */
-class SetUpFunction implements Function<DataPolicy> {
+// TODO: change the access to package private once gfsh deploy is fixed.
+public class SetUpFunction implements Function<DataPolicy> {
   static final String FUNCTION_ID = "DSequenceSetUp";
   static final String DISTRIBUTED_SEQUENCES_REGION_ID = "DSequences";
   static final String DISTRIBUTED_SEQUENCES_DISK_STORE_ID = "DSequences_DiskStore";
@@ -96,6 +97,7 @@ class SetUpFunction implements Function<DataPolicy> {
    * @param diskStoreName Disk store name to associate the region with.
    * @param dataPolicy The data policy for the region holding the sequences.
    */
+  @SuppressWarnings("unchecked")
   void createRegion(InternalCache internalCache, String diskStoreName, DataPolicy dataPolicy) {
     // Check again while holding the lock.
     if (internalCache.getRegion(DISTRIBUTED_SEQUENCES_REGION_ID) == null) {

@@ -18,7 +18,6 @@ import java.util.Collection;
 import java.util.Collections;
 
 import org.apache.geode.cache.Cache;
-import org.apache.geode.cache.Declarable;
 import org.apache.geode.cache.Region;
 import org.apache.geode.cache.execute.Function;
 import org.apache.geode.cache.execute.FunctionContext;
@@ -31,7 +30,8 @@ import org.apache.geode.security.ResourcePermission;
 /**
  * Function used to get the current value for an existing sequence.
  */
-class GetFunction extends AbstractFunction implements Function<String>, Declarable {
+// TODO: change the access to package private once gfsh deploy is fixed.
+public class GetFunction extends AbstractFunction implements Function<String> {
   final static String FUNCTION_ID = "DSequenceGet";
 
   @Override
