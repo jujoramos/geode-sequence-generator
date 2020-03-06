@@ -27,7 +27,6 @@ import org.apache.geode.DataSerializable;
 import org.apache.geode.DataSerializer;
 import org.apache.geode.cache.Cache;
 import org.apache.geode.cache.Region;
-import org.apache.geode.cache.Region;
 import org.apache.geode.cache.execute.Function;
 import org.apache.geode.cache.execute.FunctionContext;
 import org.apache.geode.cache.execute.FunctionException;
@@ -39,7 +38,6 @@ import org.apache.geode.security.ResourcePermission;
 /**
  * Function used to get the next batch of unique sequence ids.
  */
-// TODO: change the access to package private once gfsh deploy is fixed.
 public class NextBatchFunction extends AbstractFunction implements Function<NextBatchFunction.Args> {
   final static String FUNCTION_ID = "DSequenceNext";
 

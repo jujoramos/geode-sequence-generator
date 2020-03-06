@@ -30,7 +30,6 @@ import org.apache.geode.security.ResourcePermission;
 /**
  * Function used to get the current value for an existing sequence.
  */
-// TODO: change the access to package private once gfsh deploy is fixed.
 public class GetFunction extends AbstractFunction implements Function<String> {
   final static String FUNCTION_ID = "DSequenceGet";
 

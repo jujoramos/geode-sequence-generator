@@ -35,7 +35,6 @@ import org.apache.geode.security.ResourcePermission;
 /**
  * Function used to set up the distributed sequence tool.
  */
-// TODO: change the access to package private once gfsh deploy is fixed.
 public class SetUpFunction implements Function<DataPolicy> {
   static final String FUNCTION_ID = "DSequenceSetUp";
   static final String DISTRIBUTED_SEQUENCES_REGION_ID = "DSequences";
